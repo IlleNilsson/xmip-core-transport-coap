@@ -17,7 +17,13 @@
 //!
 //! The origin URI carries what the header knew:
 //! `coap://peer/sensors/1?code=0.02&id=4660`.
+//!
+//! ```text
+//! message.rs   the four-byte header, the token, the options, the payload
+//! loopback.rs  both ends on this machine: a Stream as POSTs in turn
+//! ```
 
+mod loopback;
 pub mod message;
 
 use std::net::UdpSocket;
