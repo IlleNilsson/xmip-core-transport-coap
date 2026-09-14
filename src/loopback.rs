@@ -100,19 +100,7 @@ impl Loopback for CoapTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The shapes a transport is most likely to change: nothing, one byte,
-    /// every byte value, a run of NULs, high bytes, and line endings alone.
-    fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
-        vec![
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
-        ]
-    }
+    use transport::payload::edge_payloads;
 
     #[test]
     fn the_loopback_carries_a_stream_as_posts_in_turn() {
