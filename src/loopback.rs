@@ -85,7 +85,7 @@ impl Loopback for CoapTransport {
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
         let near_end = Self::new("127.0.0.1:0").acknowledged_within(self.ack_timeout);
-        let target = format!("coap://{address}/pingpong");
+        let target = format!("coap://{address}/round-trip");
         for block in payload.chunks(MAX_PAYLOAD) {
             near_end.send(&target, block)?;
         }
@@ -108,7 +108,7 @@ mod tests {
         let arrived = server.round(b"post").expect("round");
         assert_eq!(arrived.bytes, b"post");
         assert!(arrived.origin_uri.starts_with("coap://127.0.0.1:"));
-        assert!(arrived.origin_uri.contains("/pingpong?code=0.02&id="));
+        assert!(arrived.origin_uri.contains("/round-trip?code=0.02&id="));
         let long = vec![0x2a; 5000];
         assert_eq!(server.round(&long).expect("five posts").bytes, long);
         assert!(server.round(b"").expect("empty").bytes.is_empty());
