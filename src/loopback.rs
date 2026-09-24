@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use transport::Arrived;
 use transport::Transport;
+use transport::bound::{Bound, Reading};
 use transport::error::Result;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 
@@ -36,30 +37,18 @@ impl CoapTransport {
     }
 }
 
-/// A bound server waiting for one Stream's POSTs. Bound before the sender
-/// fires, or the first one is gone.
-struct Bound {
-    /// Taking and answering read nothing of the instance; a loopback one
-    /// stands in for the one that bound the socket.
-    transport: CoapTransport,
-    socket: UdpSocket,
-    address: String,
-}
-
-impl FarEnd for Bound {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
+impl Reading for CoapTransport {
+    /// A bound server waiting for one Stream's POSTs. Bound before the sender
+    /// fires, or the first one is gone.
+    ///
     /// The POSTs in order, each answered 2.04 Changed, a retransmitted one
     /// taken once, until the empty one closes the Stream.
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
+    fn take_one(self, socket: &UdpSocket) -> Result<Arrived> {
         let mut bytes = Vec::new();
         let mut last_seen: Option<(String, u16)> = None;
         loop {
-            let request = self.transport.receive_one(&self.socket)?;
-            self.transport
-                .respond(&self.socket, &request, message::CHANGED, &[])?;
+            let request = self.receive_one(socket)?;
+            self.respond(socket, &request, message::CHANGED, &[])?;
             let seen = (request.peer.clone(), request.message.id);
             if last_seen.as_ref() == Some(&seen) {
                 continue;
@@ -74,13 +63,10 @@ impl FarEnd for Bound {
 }
 
 impl Loopback for CoapTransport {
+    /// Taking and answering read nothing of the instance; a loopback one
+    /// stands in for the one that bound the socket.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
-        let (socket, address) = self.bind()?;
-        Ok(Box::new(Bound {
-            transport: Self::loopback(),
-            socket,
-            address,
-        }))
+        Ok(Box::new(Bound::new(Self::loopback(), self.bind()?)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
