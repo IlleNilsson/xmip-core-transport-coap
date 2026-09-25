@@ -77,10 +77,6 @@ impl Loopback for CoapTransport {
         }
         near_end.send(&target, &[])
     }
-
-    fn unblock(&self, _address: &str) {
-        // The receive has its own timeout; there is no listener to poke.
-    }
 }
 
 #[cfg(test)]
