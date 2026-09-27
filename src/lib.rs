@@ -31,6 +31,7 @@ use std::time::Duration;
 
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
 use transport::error::{Result, TransportError, classify, protocol_error};
+use transport::sender::Sender;
 use transport::socket;
 use transport::{Arrived, Configured, Directions, Transport};
 use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
@@ -47,10 +48,10 @@ pub struct CoapTransport {
     ack_timeout: Duration,
     receive_timeout: Option<Duration>,
     next_id: std::sync::atomic::AtomicU16,
-    /// The sending socket, bound once and connected per request: a Stream
-    /// that travels as thousands of messages should not bind thousands of
-    /// sockets.
-    sender: std::sync::Mutex<Option<UdpSocket>>,
+    /// The sending socket, bound once per address family and connected per
+    /// request: a Stream that travels as thousands of messages should not
+    /// bind thousands of sockets.
+    sender: Sender,
 }
 
 impl CoapTransport {
@@ -65,7 +66,7 @@ impl CoapTransport {
             ack_timeout: ACK_TIMEOUT,
             receive_timeout: None,
             next_id: std::sync::atomic::AtomicU16::new(1),
-            sender: std::sync::Mutex::new(None),
+            sender: Sender::new(),
         }
     }
 
@@ -181,26 +182,23 @@ impl CoapTransport {
             Kind::NonConfirmable
         };
         let request = message::encode(&Message::request(kind, self.code, id, path, payload))?;
-        let mut guard = self
-            .sender
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if guard.is_none() {
-            let bound = UdpSocket::bind("0.0.0.0:0")
-                .map_err(|e| classify("binding the sending socket", &e))?;
-            *guard = Some(bound);
-        }
-        let socket = guard
-            .as_ref()
-            .ok_or_else(|| protocol_error("no sending socket"))?;
-        socket
-            .connect(address)
-            .map_err(|e| classify("resolving the peer", &e))?;
+        self.sender.exchange(address, |socket, peer| {
+            socket
+                .connect(peer)
+                .map_err(|e| classify("resolving the peer", &e))?;
+            self.retransmitted(socket, &request, id)
+        })
+    }
+
+    /// `request` sent on `socket`, connected to its peer, and its
+    /// acknowledgement awaited: again at twice the wait each time it does
+    /// not come, up to [`MAX_RETRANSMIT`] times.
+    fn retransmitted(&self, socket: &UdpSocket, request: &[u8], id: u16) -> Result<Message> {
         let mut timeout = self.ack_timeout;
         let mut buffer = vec![0u8; MAX_DATAGRAM];
         for attempt in 0..=MAX_RETRANSMIT {
             socket
-                .send(&request)
+                .send(request)
                 .map_err(|e| classify("sending the request", &e))?;
             if !self.confirmable {
                 return Ok(Message::request(Kind::NonConfirmable, 0, id, "", &[]));
