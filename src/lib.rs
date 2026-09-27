@@ -32,7 +32,8 @@ use std::time::Duration;
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::socket;
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Transport};
+use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
 
 /// `ACK_TIMEOUT`, RFC 7252 section 4.8.
 pub const ACK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -284,9 +285,97 @@ impl Transport for CoapTransport {
     }
 }
 
+impl Configured for CoapTransport {
+    /// The address is the local socket a Receive Location binds —
+    /// `0.0.0.0:5683` the standard port; a Send Location sends to the
+    /// `coap://host/path` its route gives.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[
+            Setting {
+                name: "method",
+                kind: xcore::settings::Kind::Choice {
+                    choices: &["POST", "PUT"],
+                },
+                presence: Presence::Optional,
+                meaning: "The request method a Stream is sent with; POST when left out.",
+                applies: Applies::Send,
+            },
+            Setting {
+                name: "confirmable",
+                kind: xcore::settings::Kind::Boolean,
+                presence: Presence::Optional,
+                meaning: "Whether a request awaits its acknowledgement, retransmitted until \
+                          it comes; confirmable when left out.",
+                applies: Applies::Send,
+            },
+            Setting {
+                name: "ack_timeout",
+                kind: xcore::settings::Kind::Duration,
+                presence: Presence::Default(Fixed::Duration(ACK_TIMEOUT)),
+                meaning: "How long the first acknowledgement is waited for, doubled on each \
+                          retransmission.",
+                applies: Applies::Send,
+            },
+            Setting {
+                name: "timeout",
+                kind: xcore::settings::Kind::Duration,
+                presence: Presence::Optional,
+                meaning: "How long a receive waits for a request; unbounded when left out.",
+                applies: Applies::Receive,
+            },
+        ],
+    };
+
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
+        let mut transport = Self::new(address);
+        if settings.optional_text("method") == Some("PUT") {
+            transport = transport.with_code(message::PUT);
+        }
+        if settings.optional_boolean("confirmable") == Some(false) {
+            transport = transport.non_confirmable();
+        }
+        if let Some(timeout) = settings.optional_duration("ack_timeout") {
+            transport = transport.acknowledged_within(timeout);
+        }
+        if let Some(timeout) = settings.optional_duration("timeout") {
+            transport = transport.timing_out_after(timeout);
+        }
+        Ok(transport)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xcore::settings::Given;
+
+    #[test]
+    fn coap_declares_its_settings_and_reads_through_them() {
+        assert_eq!(CoapTransport::SETTINGS.problems(), Vec::<String>::new());
+        let given = [
+            ("method".to_string(), Given::Text("PUT".to_string())),
+            ("confirmable".to_string(), Given::Boolean(false)),
+        ];
+        let sending = CoapTransport::open("0.0.0.0:0", Applies::Send, &given).expect("send");
+        assert_eq!(sending.code, message::PUT);
+        assert!(!sending.confirmable);
+        assert_eq!(sending.ack_timeout, ACK_TIMEOUT);
+        let given = [("timeout".to_string(), Given::Text("3s".to_string()))];
+        let receiving =
+            CoapTransport::open("0.0.0.0:5683", Applies::Receive, &given).expect("receive");
+        assert_eq!(receiving.receive_timeout, Some(Duration::from_secs(3)));
+        assert_eq!(receiving.code, message::POST);
+        let given = [("method".to_string(), Given::Text("PATCH".to_string()))];
+        let Err(refused) = CoapTransport::open("0.0.0.0:0", Applies::Send, &given) else {
+            panic!("PATCH is not a choice");
+        };
+        assert!(
+            refused.message.contains("\"method\""),
+            "{}",
+            refused.message
+        );
+    }
 
     #[test]
     fn a_post_is_taken_and_acknowledged() {
