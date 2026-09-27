@@ -31,6 +31,7 @@ use std::time::Duration;
 
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
 use transport::error::{Result, TransportError, classify, protocol_error};
+use transport::kept::Kept;
 use transport::sender::Sender;
 use transport::socket;
 use transport::{Arrived, Configured, Directions, Transport};
@@ -52,6 +53,8 @@ pub struct CoapTransport {
     /// request: a Stream that travels as thousands of messages should not
     /// bind thousands of sockets.
     sender: Sender,
+    /// The socket the first receive binds, and every receive reads.
+    receiving: Kept<UdpSocket>,
 }
 
 impl CoapTransport {
@@ -67,6 +70,7 @@ impl CoapTransport {
             receive_timeout: None,
             next_id: std::sync::atomic::AtomicU16::new(1),
             sender: Sender::new(),
+            receiving: Kept::new(),
         }
     }
 
@@ -270,11 +274,12 @@ impl Transport for CoapTransport {
         Directions::BOTH
     }
 
-    /// One request, acknowledged 2.04 Changed.
+    /// One request, acknowledged 2.04 Changed, from the socket the first
+    /// receive bound and kept.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let (socket, _) = self.bind()?;
-        let request = self.receive_one(&socket)?;
-        self.respond(&socket, &request, message::CHANGED, &[])?;
+        let socket = self.receiving.bound(|| self.bind())?;
+        let request = self.receive_one(socket)?;
+        self.respond(socket, &request, message::CHANGED, &[])?;
         Ok(vec![request.arrived()])
     }
 
@@ -434,6 +439,16 @@ mod tests {
             .expect_err("too big");
         assert!(!too_big.retryable);
         assert!(far_end.claims().is_none());
+    }
+
+    #[test]
+    fn every_receive_reads_the_socket_the_first_bound() {
+        let receiver = CoapTransport::loopback();
+        receiver.receiving.bound(|| receiver.bind()).expect("bound");
+        let address = receiver.receiving.address().expect("address");
+        transport::kept::held_across_receives(&receiver, address, 5, |at, payload| {
+            CoapTransport::loopback().send(&format!("coap://{at}/kept"), payload)
+        });
     }
 
     #[test]
