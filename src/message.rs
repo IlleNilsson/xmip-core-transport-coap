@@ -8,9 +8,11 @@ pub const MAX_DATAGRAM: usize = 1152;
 /// The most payload one message carries without block-wise transfer.
 pub const MAX_PAYLOAD: usize = 1024;
 
-pub const URI_PATH: u16 = 11;
-pub const CONTENT_FORMAT: u16 = 12;
-pub const URI_QUERY: u16 = 15;
+const URI_PATH: u16 = 11;
+#[cfg(test)]
+const CONTENT_FORMAT: u16 = 12;
+#[cfg(test)]
+const URI_QUERY: u16 = 15;
 
 pub const GET: u8 = 0x01;
 pub const POST: u8 = 0x02;
@@ -24,8 +26,6 @@ pub const CHANGED: u8 = 0x44;
 pub const CONTENT: u8 = 0x45;
 /// 4.00 Bad Request.
 pub const BAD_REQUEST: u8 = 0x80;
-/// 4.13 Request Entity Too Large.
-pub const TOO_LARGE: u8 = 0x8d;
 
 /// The message type, two bits of the first byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

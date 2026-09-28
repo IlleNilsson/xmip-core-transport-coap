@@ -30,6 +30,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
+use net::Target;
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
 use transport::sender::Sender;
@@ -38,9 +39,9 @@ use transport::{Arrived, Configured, Directions, Transport};
 use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
 
 /// `ACK_TIMEOUT`, RFC 7252 section 4.8.
-pub const ACK_TIMEOUT: Duration = Duration::from_secs(2);
+const ACK_TIMEOUT: Duration = Duration::from_secs(2);
 /// `MAX_RETRANSMIT`, RFC 7252 section 4.8.
-pub const MAX_RETRANSMIT: u32 = 4;
+const MAX_RETRANSMIT: u32 = 4;
 
 pub struct CoapTransport {
     bind: String,
@@ -76,14 +77,14 @@ impl CoapTransport {
 
     /// Send with `code` — PUT rather than POST, say.
     #[must_use]
-    pub const fn with_code(mut self, code: u8) -> Self {
+    const fn with_code(mut self, code: u8) -> Self {
         self.code = code;
         self
     }
 
     /// Send non-confirmable: fire and forget, no acknowledgement awaited.
     #[must_use]
-    pub const fn non_confirmable(mut self) -> Self {
+    const fn non_confirmable(mut self) -> Self {
         self.confirmable = false;
         self
     }
@@ -173,10 +174,9 @@ impl CoapTransport {
                 "a payload over what one CoAP message carries; block-wise transfer is not here",
             ));
         }
-        let rest = target
-            .strip_prefix("coap://")
+        let named = Target::under(&["coap"], target)
             .ok_or_else(|| protocol_error(format!("{target:?} is not coap://host/path")))?;
-        let (address, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let (address, path) = (named.authority(), named.path());
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
