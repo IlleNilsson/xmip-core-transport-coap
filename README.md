@@ -8,6 +8,21 @@ A Receive Location keeps its socket, bound on the first receive (`transport::kep
 
 A send target is read by `net::Target` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net), the one reading of a URI every technology calls. Until 2026-09-28 this technology stripped its scheme by hand.
 
+## Acknowledgement
+
+A confirmable request is answered after the whole receive cycle, piggybacked
+on its ACK. On Accepted the answer is 2.04 Changed. On Refused it is a 4.xx,
+the client error RFC 7252 section 5.9.2 says is not repeated unchanged: 4.01
+Unauthorized for a sender not identified, 4.03 Forbidden for one not
+permitted, 4.00 Bad Request for content refused. On Failed it is 5.03 Service
+Unavailable (section 5.9.3.4), which tells the device to send it again (and a send of
+this transport answered 5.xx fails as retryable, 4.xx as permanent). Until the
+answer goes the device retransmits as RFC 7252 section 4.2 says; a
+retransmission of a request already answered is answered again from the
+answers last sent and not taken twice (section 4.5), and one whose answer never
+went is a request again. A non-confirmable request expects no answer, so
+acceptance is at-most-once there. Each request arrives whole.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
