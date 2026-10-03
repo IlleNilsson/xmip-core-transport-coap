@@ -6,7 +6,9 @@
 //! CoAP is HTTP for things that run on a coin cell: the same verbs and
 //! status classes, in a four-byte header over UDP on port 5683. A Receive
 //! Location binds and takes what constrained devices POST or PUT to it,
-//! answering each confirmable request so the device stops retransmitting; a
+//! answering each confirmable request after the whole receive cycle — 2.04
+//! Changed on accepted, 5.03 Service Unavailable on refused (`receiving.rs`)
+//! — and a non-confirmable one not at all, at-most-once; a
 //! Send Location POSTs a Stream to a resource and waits for the
 //! acknowledgement, retransmitting the way RFC 7252 section 4.2 says.
 //!
@@ -19,18 +21,22 @@
 //! `coap://peer/sensors/1?code=0.02&id=4660`.
 //!
 //! ```text
-//! message.rs   the four-byte header, the token, the options, the payload
-//! loopback.rs  both ends on this machine: a Stream as POSTs in turn
+//! message.rs    the four-byte header, the token, the options, the payload
+//! receiving.rs  a request handed on, and its answer after the cycle
+//! loopback.rs   both ends on this machine: a Stream as POSTs in turn
 //! ```
 
 mod loopback;
 pub mod message;
+pub mod receiving;
 
 use std::net::UdpSocket;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
 use net::Target;
+use receiving::Answered;
 use transport::error::{Result, TransportError, classify, protocol_error};
 use transport::kept::Kept;
 use transport::sender::Sender;
@@ -56,6 +62,8 @@ pub struct CoapTransport {
     sender: Sender,
     /// The socket the first receive binds, and every receive reads.
     receiving: Kept<UdpSocket>,
+    /// The answers last sent, to answer a retransmission again.
+    answered: Arc<Answered>,
 }
 
 impl CoapTransport {
@@ -72,6 +80,7 @@ impl CoapTransport {
             next_id: std::sync::atomic::AtomicU16::new(1),
             sender: Sender::new(),
             receiving: Kept::new(),
+            answered: Arc::default(),
         }
     }
 
@@ -216,11 +225,13 @@ impl CoapTransport {
                     if response.id != id {
                         continue;
                     }
-                    if response.code >> 5 >= 4 {
-                        return Err(protocol_error(format!(
-                            "the peer answered {}",
-                            response.code_text()
-                        )));
+                    // 4.xx refuses the request; 5.xx is the server's, and
+                    // the same request may go through when sent again.
+                    let said = || format!("the peer answered {}", response.code_text());
+                    match response.code >> 5 {
+                        4 => return Err(protocol_error(said())),
+                        5.. => return Err(TransportError::retryable(said())),
+                        _ => {}
                     }
                     return Ok(response);
                 }
@@ -249,18 +260,15 @@ pub struct Request {
 }
 
 impl Request {
-    /// The Stream this request carries, its origin from the header.
+    /// Where the Stream this request carries came from, from the header.
     #[must_use]
-    pub fn arrived(&self) -> Arrived {
-        Arrived::new(
-            format!(
-                "coap://{}/{}?code={}&id={}",
-                self.peer,
-                self.message.uri_path(),
-                self.message.code_text(),
-                self.message.id
-            ),
-            self.message.payload.clone(),
+    pub fn origin(&self) -> String {
+        format!(
+            "coap://{}/{}?code={}&id={}",
+            self.peer,
+            self.message.uri_path(),
+            self.message.code_text(),
+            self.message.id
         )
     }
 }
@@ -274,13 +282,19 @@ impl Transport for CoapTransport {
         Directions::BOTH
     }
 
-    /// One request, acknowledged 2.04 Changed, from the socket the first
-    /// receive bound and kept.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Unordered(
+            "each request is its own, answered to its own sender by its message id",
+        )
+    }
+
+    /// One request, from the socket the first receive bound and kept. A
+    /// confirmable one is answered after the cycle — 2.04 Changed on
+    /// accepted, 5.03 Service Unavailable on refused; a non-confirmable one
+    /// is at-most-once ([`receiving::AT_MOST_ONCE`]).
     fn receive(&self) -> Result<Vec<Arrived>> {
         let socket = self.receiving.bound(|| self.bind())?;
-        let request = self.receive_one(socket)?;
-        self.respond(socket, &request, message::CHANGED, &[])?;
-        Ok(vec![request.arrived()])
+        Ok(vec![self.arrival(socket)?])
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
@@ -398,8 +412,81 @@ mod tests {
         let response = sender.join().expect("thread").expect("exchange");
         assert_eq!(response.code_text(), "2.01");
         assert_eq!(response.payload, b"ok");
-        let arrived = request.arrived();
-        assert!(arrived.origin_uri.contains("/sensors/1?code=0.02&id="));
+        assert!(request.origin().contains("/sensors/1?code=0.02&id="));
+    }
+
+    #[test]
+    fn a_refused_request_is_answered_4_xx_a_failed_one_5_03_and_an_accepted_one_2_04() {
+        let receiver = CoapTransport::loopback();
+        receiver.receiving.bound(|| receiver.bind()).expect("bound");
+        let target = format!(
+            "coap://{}/sensors/1",
+            receiver.receiving.address().expect("at")
+        );
+        let device = std::thread::spawn(move || {
+            let near =
+                CoapTransport::new("127.0.0.1:0").acknowledged_within(transport::LOOPBACK_TIMEOUT);
+            [0; 5].map(|_| near.send(&target, b"21.5"))
+        });
+        for why in [
+            transport::Refusal::Unidentified,
+            transport::Refusal::Forbidden,
+            transport::Refusal::Unacceptable,
+        ] {
+            let mut refused = receiver.receive().expect("refused");
+            assert!(refused[0].defers(), "a confirmable request waits");
+            refused.remove(0).refused(why).expect("answered 4.xx");
+        }
+        let mut failed = receiver.receive().expect("the fourth");
+        failed.remove(0).failed().expect("answered 5.03");
+        let mut accepted = receiver.receive().expect("sent again");
+        assert_eq!(accepted.remove(0).taken().expect("2.04").bytes, b"21.5");
+        let [unidentified, forbidden, unacceptable, failed, accepted] =
+            device.join().expect("thread");
+        for (refused, code) in [
+            (unidentified, "4.01"),
+            (forbidden, "4.03"),
+            (unacceptable, "4.00"),
+        ] {
+            let error = refused.expect_err(code);
+            assert!(!error.retryable && error.message.contains(code), "{error}");
+        }
+        let error = failed.expect_err("5.03");
+        assert!(error.retryable && error.message.contains("5.03"), "{error}");
+        accepted.expect("2.04");
+    }
+
+    #[test]
+    fn a_retransmission_of_an_answered_request_is_answered_again_not_taken() {
+        let receiver = CoapTransport::loopback();
+        receiver.receiving.bound(|| receiver.bind()).expect("bound");
+        let address = receiver.receiving.address().expect("at").to_string();
+        let device = UdpSocket::bind("127.0.0.1:0").expect("device");
+        device
+            .set_read_timeout(Some(transport::LOOPBACK_TIMEOUT))
+            .expect("timeout");
+        let request = Message::request(Kind::Confirmable, message::POST, 9, "r", b"once");
+        let request = message::encode(&request).expect("encoded");
+        device.send_to(&request, &address).expect("sent");
+        let mut arrived = receiver.receive().expect("taken");
+        // Retransmitted before the verdict: it waits in the socket.
+        device.send_to(&request, &address).expect("again");
+        assert_eq!(arrived.remove(0).taken().expect("accepted").bytes, b"once");
+        device
+            .send_to(b"\x50\x02\x00\x0a", &address)
+            .expect("a NON");
+        let next = receiver.receive().expect("the NON, not the retransmission");
+        let mut answers = [0u8; 64];
+        for _ in 0..2 {
+            let read = device.recv(&mut answers).expect("answered");
+            let answer = message::decode(&answers[..read]).expect("CoAP");
+            assert_eq!((answer.id, answer.code_text()), (9, "2.04".to_string()));
+        }
+        assert!(
+            !next[0].defers(),
+            "a non-confirmable request is at-most-once"
+        );
+        assert_eq!(next[0].origin_uri.rsplit('=').next(), Some("10"));
     }
 
     #[test]

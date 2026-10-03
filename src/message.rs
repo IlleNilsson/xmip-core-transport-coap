@@ -24,8 +24,15 @@ pub const CREATED: u8 = 0x41;
 pub const CHANGED: u8 = 0x44;
 /// 2.05 Content.
 pub const CONTENT: u8 = 0x45;
-/// 4.00 Bad Request.
+/// 4.00 Bad Request: the content refused, not to be sent again unchanged
+/// (RFC 7252 section 5.9.2.1).
 pub const BAD_REQUEST: u8 = 0x80;
+/// 4.01 Unauthorized: the sender not identified (RFC 7252 section 5.9.2.2).
+pub const UNAUTHORIZED: u8 = 0x81;
+/// 4.03 Forbidden: the sender not permitted (RFC 7252 section 5.9.2.4).
+pub const FORBIDDEN: u8 = 0x83;
+/// 5.03 Service Unavailable: not now, send it again.
+pub const SERVICE_UNAVAILABLE: u8 = 0xA3;
 
 /// The message type, two bits of the first byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -13,7 +13,7 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
-use transport::Arrived;
+use transport::Taken;
 use transport::Transport;
 use transport::bound::{Bound, Reading};
 use transport::error::Result;
@@ -43,7 +43,7 @@ impl Reading for CoapTransport {
     ///
     /// The POSTs in order, each answered 2.04 Changed, a retransmitted one
     /// taken once, until the empty one closes the Stream.
-    fn take_one(self, socket: &UdpSocket) -> Result<Arrived> {
+    fn take_one(self, socket: &UdpSocket) -> Result<Taken> {
         let mut bytes = Vec::new();
         let mut last_seen: Option<(String, u16)> = None;
         loop {
@@ -55,7 +55,7 @@ impl Reading for CoapTransport {
             }
             last_seen = Some(seen);
             if request.message.payload.is_empty() {
-                return Ok(Arrived::new(request.arrived().origin_uri, bytes));
+                return Ok(Taken::new(request.origin(), bytes));
             }
             bytes.extend_from_slice(&request.message.payload);
         }
