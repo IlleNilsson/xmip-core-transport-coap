@@ -13,6 +13,7 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
+use transport::ArrivalIdentity;
 use transport::Taken;
 use transport::Transport;
 use transport::bound::{Bound, Reading};
@@ -55,7 +56,7 @@ impl Reading for CoapTransport {
             }
             last_seen = Some(seen);
             if request.message.payload.is_empty() {
-                return Ok(Taken::new(request.origin(), bytes));
+                return Ok(Taken::new(request.origin(), bytes).from_peer(request.address));
             }
             bytes.extend_from_slice(&request.message.payload);
         }
@@ -63,6 +64,10 @@ impl Reading for CoapTransport {
 }
 
 impl Loopback for CoapTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::PEER
+    }
+
     /// Taking and answering read nothing of the instance; a loopback one
     /// stands in for the one that bound the socket.
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
