@@ -30,7 +30,7 @@ mod loopback;
 pub mod message;
 pub mod receiving;
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -136,6 +136,7 @@ impl CoapTransport {
             if message.is_request() {
                 return Ok(Request {
                     peer: peer.to_string(),
+                    address: peer,
                     message,
                 });
             }
@@ -256,6 +257,8 @@ fn is_timeout(error: &std::io::Error) -> bool {
 #[derive(Clone, Debug)]
 pub struct Request {
     pub peer: String,
+    /// The socket the request came from, as the gates read it.
+    pub address: SocketAddr,
     pub message: Message,
 }
 

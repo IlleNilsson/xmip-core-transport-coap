@@ -83,10 +83,11 @@ impl CoapTransport {
             }
         };
         let origin = request.origin();
+        let peer = request.address;
         let payload = request.message.payload.clone();
         if request.message.kind != Kind::Confirmable {
             let acknowledgement = Acknowledgement::at_most_once(AT_MOST_ONCE);
-            return Ok(Arrived::whole(origin, payload, acknowledgement));
+            return Ok(Arrived::whole(origin, payload, acknowledgement).from_peer(peer));
         }
         let answering = Datagram::to(socket, request.peer.clone())?;
         let answered = Arc::clone(&self.answered);
@@ -103,6 +104,6 @@ impl CoapTransport {
             answered.remember(&request, answer);
             Ok(())
         });
-        Ok(Arrived::whole(origin, payload, acknowledgement))
+        Ok(Arrived::whole(origin, payload, acknowledgement).from_peer(peer))
     }
 }
