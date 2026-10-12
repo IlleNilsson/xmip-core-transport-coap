@@ -291,6 +291,10 @@ impl Transport for CoapTransport {
         )
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Waits("a read of the socket waits for a request")
+    }
+
     /// One request, from the socket the first receive bound and kept. A
     /// confirmable one is answered after the cycle — 2.04 Changed on
     /// accepted, 5.03 Service Unavailable on refused; a non-confirmable one
