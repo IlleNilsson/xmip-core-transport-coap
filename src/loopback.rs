@@ -98,7 +98,7 @@ mod tests {
         assert!(arrived.origin_uri.contains("/round-trip?code=0.02&id="));
         let long = vec![0x2a; 5000];
         assert_eq!(server.round(&long).expect("five posts").bytes, long);
-        assert!(server.round(b"").expect("empty").bytes.is_empty());
+        assert_eq!(server.round(b"").expect("empty").bytes, [] as [u8; 0]);
     }
 
     #[test]
