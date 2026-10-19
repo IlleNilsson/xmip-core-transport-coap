@@ -299,12 +299,17 @@ impl Transport for CoapTransport {
     /// confirmable one is answered after the cycle — 2.04 Changed on
     /// accepted, 5.03 Service Unavailable on refused; a non-confirmable one
     /// is at-most-once ([`receiving::AT_MOST_ONCE`]).
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         let socket = self.receiving.bound(|| self.bind())?;
         Ok(vec![self.arrival(socket)?])
     }
 
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one CoAP request carries the whole body in one datagram")
+    }
+
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         self.exchange(target, bytes).map(|_| ())
     }
 }
