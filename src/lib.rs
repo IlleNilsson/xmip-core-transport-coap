@@ -184,7 +184,7 @@ impl CoapTransport {
                 "a payload over what one CoAP message carries; block-wise transfer is not here",
             ));
         }
-        let named = Target::under(&["coap"], target)
+        let named = Target::under(Self::SCHEMES, target)
             .ok_or_else(|| protocol_error(format!("{target:?} is not coap://host/path")))?;
         let (address, path) = (named.authority(), named.path());
         let id = self
@@ -355,6 +355,9 @@ impl Configured for CoapTransport {
             },
         ],
     };
+
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["coap"];
 
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let mut transport = Self::new(address);
