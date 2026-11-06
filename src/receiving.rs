@@ -17,7 +17,8 @@
 
 use std::collections::VecDeque;
 use std::net::UdpSocket;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use xcore::lock::Locked;
 
 use transport::answer::Datagram;
 use transport::error::{Result, classify};
@@ -46,7 +47,7 @@ impl Answered {
     /// # Errors
     /// Where the answer could not be sent.
     fn repeated(&self, socket: &UdpSocket, request: &Request) -> Result<bool> {
-        let answered = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let answered = self.0.locked();
         let Some((_, _, answer)) = answered
             .iter()
             .find(|(peer, id, _)| *peer == request.peer && *id == request.message.id)
@@ -60,7 +61,7 @@ impl Answered {
     }
 
     fn remember(&self, request: &Request, answer: Vec<u8>) {
-        let mut answered = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut answered = self.0.locked();
         if answered.len() == REMEMBERED {
             answered.pop_front();
         }
