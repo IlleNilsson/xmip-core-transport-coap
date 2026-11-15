@@ -14,6 +14,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 use transport::ArrivalIdentity;
+use transport::Configured;
 use transport::Taken;
 use transport::Transport;
 use transport::bound::{Bound, Reading};
