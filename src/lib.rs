@@ -60,7 +60,7 @@ pub struct CoapTransport {
     /// request: a Stream that travels as thousands of messages should not
     /// bind thousands of sockets.
     sender: Sender,
-    /// The socket the first receive binds, and every receive reads.
+    /// The socket its open binds, and every receive reads.
     receiving: Kept<UdpSocket>,
     /// The answers last sent, to answer a retransmission again.
     answered: Arc<Answered>,
@@ -288,12 +288,12 @@ impl Transport for CoapTransport {
         transport::Waiting::Waits("a read of the socket waits for a request")
     }
 
-    /// One request, from the socket the first receive bound and kept. A
+    /// One request, from the socket its open bound and kept. A
     /// confirmable one is answered after the cycle — 2.04 Changed on
     /// accepted, 5.03 Service Unavailable on refused; a non-confirmable one
     /// is at-most-once ([`receiving::AT_MOST_ONCE`]).
     fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
-        let socket = self.receiving.bound(|| self.bind())?;
+        let socket = self.receiving.listener()?;
         Ok(vec![self.arrival(socket)?])
     }
 
@@ -366,6 +366,12 @@ impl Configured for CoapTransport {
             transport = transport.acknowledged_within(timeout);
         }
         Ok(transport)
+    }
+
+    /// The socket every receive takes from, bound where a Receive Location
+    /// listens.
+    fn listening(&self) -> Result<Option<&str>> {
+        self.receiving.listening(|| self.bind())
     }
 }
 
