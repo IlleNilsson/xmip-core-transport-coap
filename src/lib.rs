@@ -350,6 +350,14 @@ impl Configured for CoapTransport {
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["coap"];
 
+    /// The whole address: a send reads the resource it POSTs to from a
+    /// `coap://host/path` target ([`CoapTransport::exchange`]), so a Send
+    /// Location sends where its address says; a Receive Location binds the
+    /// address in its own terms.
+    fn own_target(address: &str) -> &str {
+        address
+    }
+
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.receive_timeout)
     }
@@ -405,6 +413,29 @@ mod tests {
             "{}",
             refused.message
         );
+    }
+
+    /// A Send Location as a node builds it, from its address, sends where
+    /// the node sends it, its own target the whole `coap://` address, and
+    /// its far end takes its one POST whole (the owner, 2026-11-25: *just do
+    /// your best for now*). Until 2026-11-25 its target was the address
+    /// without its scheme, which a send refused, and the far end waited for
+    /// an empty POST no node sends.
+    #[test]
+    fn a_send_location_sends_where_its_address_says() {
+        use transport::loopback::Loopback;
+        let far = CoapTransport::loopback().far_end().expect("a far end");
+        let address = format!("coap://{}/orders", far.address());
+        let sending = CoapTransport::open(&address, Applies::Send, &[]).expect("sending");
+        let taking = std::thread::spawn(move || far.take_one());
+
+        let sent = sending.send(CoapTransport::own_target(&address), b"order");
+
+        let taken = taking.join().expect("the far end");
+        sent.expect("sent where its address says");
+        let taken = taken.expect("taken");
+        assert_eq!(taken.bytes, b"order");
+        assert!(taken.origin_uri.contains("/orders?code=0.02"), "{taken:?}");
     }
 
     #[test]

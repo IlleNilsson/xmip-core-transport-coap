@@ -8,6 +8,8 @@ A Receive Location keeps its socket, bound as its transport is opened (`Configur
 
 A send target is read by `net::Target` in [xmip-core-library-net](https://github.com/IlleNilsson/xmip-core-library-net), the one reading of a URI every technology calls. Until 2026-09-28 this technology stripped its scheme by hand.
 
+A Send Location's target is its whole address, `coap://host:port/path`, which a send reads the resource from (`Configured::own_target`); until 2026-11-25 it was the address without its scheme, and every send of a node was refused. The loopback's server takes POSTs until one shorter than a message carries closes the Stream, as a last block does, so it takes a node's one POST whole, and the near end sends an empty POST only after a full one; until 2026-11-25 only an empty POST closed it, and a node's POST was never taken.
+
 ## Acknowledgement
 
 A confirmable request is answered after the whole receive cycle, piggybacked

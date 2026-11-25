@@ -1,9 +1,13 @@
 //! Both ends of one exchange on this machine (ADR-0051): a server on an
 //! ephemeral local port, and a Stream sent to it as confirmable POSTs
 //! of at most [`MAX_PAYLOAD`] bytes in turn, each acknowledged before the
-//! next goes, then an empty POST to close. The server takes them in order, a
-//! retransmitted one only once. What block-wise transfer (RFC 7959) will do
-//! above this, done here so the round stays one thing.
+//! next goes. The server takes them in order, a retransmitted one only once,
+//! and the first shorter than [`MAX_PAYLOAD`] closes the Stream, as a last
+//! block does (RFC 7959 section 2.2 marks it): a Stream that fills its last
+//! POST is closed by an empty one. A node's Send Location sends one POST, so
+//! the server takes it whole; until 2026-11-25 only an empty POST closed,
+//! and it waited on a node for one that never came. What block-wise transfer
+//! (RFC 7959) will do above this, done here so the round stays one thing.
 //!
 //! One message in flight is block-wise transfer with a window of one, and it
 //! is the flow control that keeps a burst from overrunning the far end's
@@ -44,7 +48,7 @@ impl Reading for CoapTransport {
     /// fires, or the first one is gone.
     ///
     /// The POSTs in order, each answered 2.04 Changed, a retransmitted one
-    /// taken once, until the empty one closes the Stream.
+    /// taken once, until one shorter than [`MAX_PAYLOAD`] closes the Stream.
     fn take_one(self, socket: &UdpSocket) -> Result<Taken> {
         let mut bytes = Vec::new();
         let mut last_seen: Option<(String, u16)> = None;
@@ -56,10 +60,10 @@ impl Reading for CoapTransport {
                 continue;
             }
             last_seen = Some(seen);
-            if request.message.payload.is_empty() {
+            bytes.extend_from_slice(&request.message.payload);
+            if request.message.payload.len() < MAX_PAYLOAD {
                 return Ok(Taken::new(request.origin(), bytes).from_peer(request.address));
             }
-            bytes.extend_from_slice(&request.message.payload);
         }
     }
 }
@@ -75,13 +79,18 @@ impl Loopback for CoapTransport {
         Ok(Box::new(Bound::new(Self::loopback(), self.bind()?)))
     }
 
+    /// The POSTs in turn, and an empty one where the last was full or
+    /// there was none.
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
         let near_end = Self::new("127.0.0.1:0").acknowledged_within(self.ack_timeout);
         let target = format!("coap://{address}/round-trip");
         for block in payload.chunks(MAX_PAYLOAD) {
             near_end.send(&target, block)?;
         }
-        near_end.send(&target, &[])
+        if payload.len().is_multiple_of(MAX_PAYLOAD) {
+            near_end.send(&target, &[])?;
+        }
+        Ok(())
     }
 }
 
@@ -99,6 +108,8 @@ mod tests {
         assert!(arrived.origin_uri.contains("/round-trip?code=0.02&id="));
         let long = vec![0x2a; 5000];
         assert_eq!(server.round(&long).expect("five posts").bytes, long);
+        let filled = vec![0x2a; MAX_PAYLOAD * 2];
+        assert_eq!(server.round(&filled).expect("closed empty").bytes, filled);
         assert_eq!(server.round(b"").expect("empty").bytes, [] as [u8; 0]);
     }
 
