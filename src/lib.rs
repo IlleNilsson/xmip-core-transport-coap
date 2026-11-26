@@ -25,30 +25,49 @@
 //! receiving.rs  a request handed on, and its answer after the cycle
 //! loopback.rs   both ends on this machine: a Stream as POSTs in turn
 //! ```
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, the
+//! acknowledgement wait it takes unless told otherwise among it, and none
+//! of the code above, which is behind the default feature: what the
+//! surfaces' library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 mod loopback;
+#[cfg(feature = "default")]
 pub mod message;
+#[cfg(feature = "default")]
 pub mod receiving;
 
+#[cfg(feature = "default")]
 use std::net::{SocketAddr, UdpSocket};
+#[cfg(feature = "default")]
 use std::sync::Arc;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
+use declaration::ACK_TIMEOUT;
+#[cfg(feature = "default")]
 pub use message::{Kind, MAX_DATAGRAM, MAX_PAYLOAD, Message};
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
 use receiving::Answered;
+#[cfg(feature = "default")]
 use transport::error::{Result, TransportError, classify, protocol_error};
-use transport::kept::Kept;
-use transport::sender::Sender;
-use transport::socket;
-use transport::{Arrived, Configured, Directions, Transport};
-use xcore::settings::{Applies, Fixed, Presence, Read, Setting, Settings};
+#[cfg(feature = "default")]
+use transport::{Arrived, Configured, Directions, Transport, kept::Kept, sender::Sender, socket};
+#[cfg(feature = "default")]
+use xcore::settings::{Read, Settings};
 
-/// `ACK_TIMEOUT`, RFC 7252 section 4.8.
-const ACK_TIMEOUT: Duration = Duration::from_secs(2);
 /// `MAX_RETRANSMIT`, RFC 7252 section 4.8.
+#[cfg(feature = "default")]
 const MAX_RETRANSMIT: u32 = 4;
 
+#[cfg(feature = "default")]
 pub struct CoapTransport {
     bind: String,
     code: u8,
@@ -66,6 +85,7 @@ pub struct CoapTransport {
     answered: Arc<Answered>,
 }
 
+#[cfg(feature = "default")]
 impl CoapTransport {
     /// Bind at `bind`; `0.0.0.0:5683` is the standard port. Sends POST,
     /// confirmable.
@@ -239,6 +259,7 @@ impl CoapTransport {
     }
 }
 
+#[cfg(feature = "default")]
 fn is_timeout(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -247,6 +268,7 @@ fn is_timeout(error: &std::io::Error) -> bool {
 }
 
 /// One request as it arrived, and who sent it.
+#[cfg(feature = "default")]
 #[derive(Clone, Debug)]
 pub struct Request {
     pub peer: String,
@@ -255,6 +277,7 @@ pub struct Request {
     pub message: Message,
 }
 
+#[cfg(feature = "default")]
 impl Request {
     /// Where the Stream this request carries came from, from the header.
     #[must_use]
@@ -269,6 +292,7 @@ impl Request {
     }
 }
 
+#[cfg(feature = "default")]
 impl Transport for CoapTransport {
     fn name(&self) -> &'static str {
         "coap"
@@ -307,48 +331,10 @@ impl Transport for CoapTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for CoapTransport {
-    /// The address is the local socket a Receive Location binds —
-    /// `0.0.0.0:5683` the standard port; a Send Location sends to the
-    /// `coap://host/path` its route gives.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "method",
-                kind: xcore::settings::Kind::Choice {
-                    choices: &["POST", "PUT"],
-                },
-                presence: Presence::Optional,
-                meaning: "The request method a Stream is sent with; POST when left out.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "confirmable",
-                kind: xcore::settings::Kind::Boolean,
-                presence: Presence::Optional,
-                meaning: "Whether a request awaits its acknowledgement, retransmitted until \
-                          it comes; confirmable when left out.",
-                applies: Applies::Send,
-            },
-            Setting {
-                name: "ack_timeout",
-                kind: xcore::settings::Kind::Duration,
-                presence: Presence::Default(Fixed::Duration(ACK_TIMEOUT)),
-                meaning: "How long the first acknowledgement is waited for, doubled on each \
-                          retransmission.",
-                applies: Applies::Send,
-            },
-            transport::configured::timeout(
-                Applies::Receive,
-                None,
-                "How long a receive waits for a request; unbounded when left out.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["coap"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     /// The whole address: a send reads the resource it POSTs to from a
     /// `coap://host/path` target ([`CoapTransport::exchange`]), so a Send
@@ -386,7 +372,7 @@ impl Configured for CoapTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::settings::Given;
+    use xcore::settings::{Applies, Given};
 
     #[test]
     fn coap_declares_its_settings_and_reads_through_them() {
